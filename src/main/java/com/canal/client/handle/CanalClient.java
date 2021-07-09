@@ -6,6 +6,7 @@ import com.alibaba.otter.canal.client.CanalConnectors;
 import com.alibaba.otter.canal.protocol.CanalEntry;
 import com.alibaba.otter.canal.protocol.Message;
 import com.canal.client.entity.BinLogInfo;
+import com.canal.client.entity.BinlogDetail;
 import com.canal.client.entity.LogEventEnum;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import lombok.extern.slf4j.Slf4j;
@@ -14,9 +15,11 @@ import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.stream.Collectors;
 
 @Component
 @Slf4j
@@ -100,17 +103,60 @@ public class CanalClient implements InitializingBean {
             binLogInfo.setEvent(LogEventEnum.getValue(eventType.name()));
             for (CanalEntry.RowData rowData : rowChange.getRowDatasList()) {
                 if (eventType.equals(CanalEntry.EventType.DELETE)) {
-
+                    // 删除语句
+                    binLogInfo.setColumns(getInsertOrDelete(rowData.getBeforeColumnsList()));
                 } else if (eventType.equals(CanalEntry.EventType.INSERT)) {
-
+                    // 新增语句
+                    binLogInfo.setColumns(getInsertOrDelete(rowData.getAfterColumnsList()));
                 } else {
-
+                    // 更新语句
+                    binLogInfo.setColumns(getUpdate(rowData.getBeforeColumnsList(), rowData.getAfterColumnsList()));
                 }
                 String result = JSONObject.toJSONString(binLogInfo);
                 log.info("binlog result:{}", result);
                 // 消息放入MQ
             }
         }
+    }
+
+    /**
+     * 处理新增或删除语句
+     * 
+     * @param columns
+     * @return
+     */
+    private List<BinlogDetail> getInsertOrDelete(List<CanalEntry.Column> columns) {
+        return columns.stream().map(column -> {
+            BinlogDetail detail = new BinlogDetail();
+            detail.setN(column.getName());
+            detail.setT(column.getMysqlType());
+            detail.setV(column.getValue());
+            detail.setNullValue(column.getIsNull());
+            detail.setUpdated(true);
+            return detail;
+        }).collect(Collectors.toList());
+    }
+
+    /**
+     * 处理修改语句
+     * 
+     * @param before
+     * @param after
+     * @return
+     */
+    private List<BinlogDetail> getUpdate(List<CanalEntry.Column> before, List<CanalEntry.Column> after) {
+        List<BinlogDetail> details = new ArrayList<>(before.size());
+        for (int i = 0; i < before.size(); i++) {
+            BinlogDetail detail = new BinlogDetail();
+            detail.setN(before.get(i).getName());
+            detail.setT(before.get(i).getMysqlType());
+            detail.setV(after.get(i).getValue());
+            detail.setOriginVal(before.get(i).getValue());
+            detail.setNullValue(after.get(i).getIsNull());
+            detail.setUpdated(after.get(i).getUpdated());
+            details.add(detail);
+        }
+        return details;
     }
 
 }
