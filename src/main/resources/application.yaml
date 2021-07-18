@@ -1,6 +1,8 @@
 spring:
   application:
     name: canal-client
+  profiles:
+    active: dev
 
 server:
   port: 8080
